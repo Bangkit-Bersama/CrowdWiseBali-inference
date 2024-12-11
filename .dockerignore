@@ -1,0 +1,11 @@
+.dockerignore
+Dockerfile
+
+.gitignore
+
+__pycache__/
+venv/
+
+models/
+
+service-account.json
