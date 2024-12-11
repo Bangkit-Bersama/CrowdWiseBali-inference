@@ -2,26 +2,33 @@ import datetime
 import json
 import os
 
+import flask
+import flask_cors
+
+from keras.src.models.sequential import Sequential
+from keras.api.models import load_model
 import numpy as np
 import pandas as pd
-from keras.api.models import load_model
 from sklearn.preprocessing import MinMaxScaler
+
+app = flask.Flask(__name__)
+flask_cors.CORS(app)
 
 place_ids: dict[str, str]
 
-df1 = pd.read_csv("combined_data2.csv")
+tdata: pd.DataFrame
 
-df1["Year"] = pd.to_datetime(df1["Date"]).dt.year
-df1["YearMonth"] = pd.to_datetime(df1["Date"]).dt.to_period("M").astype(str)
-df1 = df1[["Title", "Date", "Day", "Hour", "OccupancyPercent", "Year", "YearMonth"]]
+loaded_models: dict[str, Sequential] = {}
 
 
 def inference(place_id: str, date: str, hour: int) -> tuple[any, str]:
+    global loaded_models
+
     location_name = place_ids.get(place_id)
     if location_name == None:
         return (None, f"Place ID '{place_id}' not registered in database.")
 
-    location_data = df1[df1["Title"] == location_name]
+    location_data = tdata[tdata["Title"] == location_name]
     if location_data.empty:
         return (None, f"Location '{location_name}' not found in the dataset.")
 
@@ -40,12 +47,15 @@ def inference(place_id: str, date: str, hour: int) -> tuple[any, str]:
     # Reshape X for LSTM input
     X = np.reshape(X, (X.shape[0], X.shape[1], 1))
 
-    # Load model
-    model_path = f"models/{place_id}.h5"
-    if os.path.exists(model_path):
-        model = load_model(model_path)
-    else:
-        return (None, "Model for the location not found.")
+    model: Sequential = loaded_models.get(place_id)
+    if model == None:
+        # Load model
+        model_path = f"models/{place_id}.h5"
+        if os.path.exists(model_path):
+            model = load_model(model_path)
+            loaded_models[place_id] = model
+        else:
+            return (None, "Model for the location not found.")
 
     # Predict occupancy percent
     predictions = model.predict(X)
@@ -81,14 +91,51 @@ def inference(place_id: str, date: str, hour: int) -> tuple[any, str]:
     return (predicted_value, None)
 
 
+# Route to handle predictions (POST request)
+@app.route("/", methods=["POST"])
+def predict():
+    # Get data from JSON body
+    data = flask.request.get_json()
+
+    place_id = data.get("placeId")
+    date = data.get("date")
+    hour = data.get("hour")
+
+    if not place_id or not date or not hour:
+        return flask.jsonify({"error": "Missing required parameters"}), 400
+
+    result = inference(place_id, date, hour)
+
+    if result[0] == None:
+        return flask.jsonify({"error": result[1]})
+    
+    occupancy = float(result[0])
+
+    # Return response
+    return flask.jsonify({"prediction": occupancy})
+
+
 def main():
     global place_ids
+    global tdata
 
     with open("places.json", "rt") as f:
         data = json.loads(f.read())
         place_ids = data["placeIds"]
 
-    print(inference("ChIJKWD5VBdH0i0ReivZYCJIm24", "2024-01-01", 17))
+    tdata_raw = pd.read_csv("combined_data2.csv")
+    tdata_raw["Year"] = pd.to_datetime(tdata_raw["Date"]).dt.year
+    tdata_raw["YearMonth"] = (
+        pd.to_datetime(tdata_raw["Date"]).dt.to_period("M").astype(str)
+    )
+
+    tdata = tdata_raw[
+        ["Title", "Date", "Day", "Hour", "OccupancyPercent", "Year", "YearMonth"]
+    ]
+
+    app.run(host='0.0.0.0', port=3000)
+
+    # print(inference("ChIJKWD5VBdH0i0ReivZYCJIm24", "2024-01-01", 17))
 
 
 if __name__ == "__main__":
