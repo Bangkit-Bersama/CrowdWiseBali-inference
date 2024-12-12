@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
+MODEL_VERSION = 1
+
 app = flask.Flask(__name__)
 flask_cors.CORS(app)
 
@@ -50,7 +52,7 @@ def inference(place_id: str, date: str, hour: int) -> tuple[any, str]:
     model: Sequential = loaded_models.get(place_id)
     if model == None:
         # Load model
-        model_path = f"models/{place_id}.h5"
+        model_path = f"models/{MODEL_VERSION}/{place_id}.h5"
         if os.path.exists(model_path):
             model = load_model(model_path)
             loaded_models[place_id] = model
@@ -119,11 +121,11 @@ def main():
     global place_ids
     global tdata
 
-    with open("places.json", "rt") as f:
+    with open(f"models/{MODEL_VERSION}/places.json", "rt") as f:
         data = json.loads(f.read())
         place_ids = data["placeIds"]
 
-    tdata_raw = pd.read_csv("combined_data2.csv")
+    tdata_raw = pd.read_csv(f"models/{MODEL_VERSION}/tdata.csv")
     tdata_raw["Year"] = pd.to_datetime(tdata_raw["Date"]).dt.year
     tdata_raw["YearMonth"] = (
         pd.to_datetime(tdata_raw["Date"]).dt.to_period("M").astype(str)
@@ -134,8 +136,6 @@ def main():
     ]
 
     app.run(host='0.0.0.0', port=3000)
-
-    # print(inference("ChIJKWD5VBdH0i0ReivZYCJIm24", "2024-01-01", 17))
 
 
 if __name__ == "__main__":
